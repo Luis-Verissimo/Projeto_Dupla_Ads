@@ -1,7 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a single version of Python
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
-name: Python application
+name: Python DevSecOps Pipeline
 
 on:
   push:
@@ -13,27 +10,59 @@ permissions:
   contents: read
 
 jobs:
-  build:
-
+  build_and_sast: # Renomeado para refletir a análise SAST
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.10
       uses: actions/setup-python@v3
       with:
         python-version: "3.10"
-    - name: Install dependencies
+    
+    # --- Passo de Instalação e SAST (Bandit) ---
+    - name: Install dependencies and Bandit
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pytest
+        pip install flake8 pytest # Ferramentas originais
+        pip install bandit         # Instalação do Bandit para SAST
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: 🚨 Run SAST with Bandit
+      run: |
+        # Executa o Bandit no código-fonte.
+        # -r: recursivo | -ll: nível de severidade (HIGH/MEDIUM) | -o: arquivo de saída (SARIF)
+        bandit -r . -f sarif -o bandit-results.sarif || true
+      
+    - name: Upload Bandit SAST results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3 # Reutiliza a ação do CodeQL para upload de SARIF
+      with:
+        sarif_file: bandit-results.sarif
+      
+
     - name: Lint with flake8
       run: |
-        # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        
     - name: Test with pytest
       run: |
         pytest
+
+  
+  dynamic_analysis:
+    needs: build_and_sast
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Deploy application to a Staging/Test environment
+      run: echo "Simulating deployment to http://staging.myapp.com" 
+    
+    # --- Passo de Análise DAST (OWASP ZAP) ---
+    - name: 🌐 Run DAST with OWASP ZAP Baseline Scan
+      uses: zaproxy/action-baseline@v0.12.0
+      with:
+        # **IMPORTANTE:** Mude esta URL para o endereço real do seu ambiente de teste!
+        target: 'http://staging.myapp.com' 
+        # Falha o job se encontrar alertas de risco ALTO ou MÉDIO
+        fail_action: true
+        allow_issue_writing: false
